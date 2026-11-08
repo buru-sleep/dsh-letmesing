@@ -81,6 +81,10 @@ try {
     let fadeTimer = 0
     let lastReasoningAt = 0
     let lastRunning = false
+    // Set once answer text starts and cleared when the model moves on to a tool
+    // call, so the watchdog cannot restart music halfway through a written
+    // answer while the turn is still running.
+    let turnHadText = false
     // Set when the model asks the user something; later activity clears it.
     let pausedForUser = false
     // Last moment answer text arrived. A timestamp rather than a flag: when the
@@ -553,6 +557,7 @@ try {
         }
         if (type === 'text-delta' || type === 'text') {
           // The model is writing the answer: it is no longer "thinking".
+          turnHadText = true
           stopForText()
           continue
         }
@@ -578,8 +583,19 @@ try {
           continue
         }
         if (type === 'finish') {
+          const kind = chunk.reason && chunk.reason.kind
+          turnHadText = false
           pausedForUser = false
-          if (config.mode !== 'always') scheduleStop()
+          if (config.mode === 'always') continue
+          if (kind === 'tool-calls') {
+            // More work follows — a tool run, and often a user approval prompt.
+            // The turn is not over, so this is exactly where the music should
+            // keep playing instead of fading out.
+            cancelStop()
+            resumePlayback()
+          } else {
+            scheduleStop()
+          }
         }
       }
     }
@@ -1164,6 +1180,7 @@ try {
           lastRunning &&
           !inTextPhase() &&
           !pausedForUser &&
+          !turnHadText &&
           audio.paused
         ) {
           resumePlayback()
