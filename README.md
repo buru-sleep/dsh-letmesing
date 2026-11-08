@@ -11,8 +11,8 @@
 ## 功能
 
 - **三种触发时机**，在设置里切换：
-  - `推理时`（默认）— 只有模型真的在推理时播放，正文输出、工具执行时静音
-  - `整轮运行` — 从你发出消息到回复结束，全程播放
+  - `整轮运行`（默认）— 从你发出消息到回复结束，全程播放
+  - `推理时` — 只有模型真的在推理时播放，正文输出、工具执行时静音
   - `常驻` — 一直播放，当普通播放器用
 - **自己选音乐**：设置页里点「选择文件夹」，指向你存放音乐的目录即可，支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus
 - **淡入淡出**：进入 700ms 渐强，退出 420ms 渐弱，不会有硬切的突兀感
@@ -58,7 +58,7 @@ git clone https://github.com/<your-name>/dsh-letmesing.git
 | 项 | 位置 | 说明 |
 | --- | --- | --- |
 | 启用 | `localStorage: letmesing.enabled` | 总开关 |
-| 播放时机 | `localStorage: letmesing.mode` | `reasoning` / `turn` / `always` |
+| 播放时机 | `localStorage: letmesing.mode` | `turn`（默认）/ `reasoning` / `always` |
 | 音量 | `localStorage: letmesing.volume` | 0–1 |
 | 曲目 | `localStorage: letmesing.file` | 文件名 |
 | 音乐文件夹 | `~/.dsh/letmesing/config.json` | Host 侧持久化，重启不丢 |

@@ -42,10 +42,10 @@ window.__ModuleLoader__.load({
 
     const config = {
       enabled: lsBool(LS.enabled, true),
-      // 'reasoning' = only while the model is actually thinking (default)
-      // 'turn'      = whenever the whole turn is running
+      // 'turn'      = whenever the whole turn is running (default)
+      // 'reasoning' = only while the model is actually thinking
       // 'always'    = always
-      mode: lsString(LS.mode, 'reasoning'),
+      mode: lsString(LS.mode, 'turn'),
       volume: Math.min(1, Math.max(0, lsNumber(LS.volume, 0.45))),
       file: lsString(LS.file, ''),
     }
@@ -471,8 +471,8 @@ window.__ModuleLoader__.load({
     }
 
     const MODES = [
+      { key: 'turn', label: '整轮运行', hint: '从发出消息到这一轮结束都播放（默认）' },
       { key: 'reasoning', label: '推理时', hint: '模型真正在思考时才播放，开始回答就淡出' },
-      { key: 'turn', label: '整轮运行', hint: '从发出消息到这一轮结束都播放' },
       { key: 'always', label: '常驻', hint: '打开页面就一直播放' },
     ]
 
