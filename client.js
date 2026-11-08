@@ -717,6 +717,15 @@ window.__ModuleLoader__.load({
         ),
         React.createElement(
           SettingRow,
+          { title: '开发', desc: '改过代码后点一下即可重新加载界面，不必重启 DSH' },
+          React.createElement(
+            'button',
+            { onClick: () => location.reload(), style: buttonStyle(false) },
+            '重新加载界面',
+          ),
+        ),
+        React.createElement(
+          SettingRow,
           { title: '播放时机', desc: MODES.find((item) => item.key === mode)?.hint || '' },
           React.createElement(
             'div',
