@@ -37,21 +37,49 @@ let configCache = null
 
 function readConfig() {
   if (configCache) return configCache
+  let dir = DEFAULT_DIR
+  let prefs = {}
   try {
     const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))
-    const dir = typeof parsed?.dir === 'string' ? parsed.dir.trim() : ''
-    configCache = { dir: dir || DEFAULT_DIR }
-  } catch {
-    configCache = { dir: DEFAULT_DIR }
-  }
+    if (typeof parsed?.dir === 'string' && parsed.dir.trim()) dir = parsed.dir.trim()
+    if (parsed && typeof parsed.prefs === 'object' && parsed.prefs) prefs = parsed.prefs
+  } catch {}
+  configCache = { dir, prefs }
   return configCache
 }
 
-function writeConfig(next) {
+const MODE_KEYS = ['turn', 'reasoning', 'always']
+const PLAY_MODE_KEYS = ['one', 'shuffle', 'sequence']
+
+// The browser keeps its own copy of these (the desktop port changes on every
+// start, so origin-scoped storage cannot be trusted across restarts), and this
+// is the copy that survives: only known keys, only sane values.
+function sanitizePrefs(input) {
+  const out = {}
+  if (!input || typeof input !== 'object') return out
+  if (typeof input.enabled === 'boolean') out.enabled = input.enabled
+  if (MODE_KEYS.includes(input.mode)) out.mode = input.mode
+  if (PLAY_MODE_KEYS.includes(input.playMode)) out.playMode = input.playMode
+  if (typeof input.volume === 'number' && isFinite(input.volume)) {
+    out.volume = Math.min(1, Math.max(0, input.volume))
+  }
+  if (typeof input.file === 'string') out.file = input.file
+  if (Array.isArray(input.order)) {
+    out.order = input.order.filter((name) => typeof name === 'string').slice(0, MAX_TRACKS)
+  }
+  return out
+}
+
+function writeConfig(patch) {
+  const current = readConfig()
+  const next = {
+    dir: typeof patch.dir === 'string' && patch.dir ? patch.dir : current.dir,
+    prefs: patch.prefs !== undefined ? sanitizePrefs(patch.prefs) : current.prefs,
+  }
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true })
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8')
-    configCache = { dir: next.dir }
+    configCache = next
     return true
   } catch (error) {
     throw new Error(`cannot write ${CONFIG_FILE}: ${error?.message ?? error}`)
@@ -170,6 +198,7 @@ function snapshot() {
     dir: dir || '',
     defaultDir: DEFAULT_DIR,
     files: listMusic(dir),
+    prefs: readConfig().prefs || {},
   }
 }
 
@@ -185,14 +214,23 @@ export function apply(ctx) {
       handler(req, res) {
         if (req.method === 'POST') {
           readBody(req).then((body) => {
-            const candidate = typeof body.dir === 'string' ? body.dir.trim() : ''
-            const resolved = existingDir(candidate)
-            if (!resolved) {
-              sendJson(res, 400, { error: `not a folder: ${candidate || '(empty)'}` })
+            const patch = {}
+            if (typeof body.dir === 'string') {
+              const candidate = body.dir.trim()
+              const resolved = existingDir(candidate)
+              if (!resolved) {
+                sendJson(res, 400, { error: `not a folder: ${candidate || '(empty)'}` })
+                return
+              }
+              patch.dir = resolved
+            }
+            if (body.prefs !== undefined) patch.prefs = body.prefs
+            if (!('dir' in patch) && !('prefs' in patch)) {
+              sendJson(res, 400, { error: 'send dir and/or prefs' })
               return
             }
             try {
-              writeConfig({ dir: resolved })
+              writeConfig(patch)
               sendJson(res, 200, snapshot())
             } catch (error) {
               sendJson(res, 500, { error: String(error?.message ?? error) })

@@ -62,6 +62,8 @@ try {
       // 'shuffle'  = pick a random other track when one ends
       // 'sequence' = play the folder in order, wrapping at the end
       playMode: lsString(LS.playMode, 'one'),
+      // User-chosen playback order; empty means "the order the host returned".
+      order: [],
     }
 
     const audio = new Audio()
@@ -152,6 +154,43 @@ try {
           lsWrite(LS.file, config.file)
         }
       }
+      if (body.prefs && typeof body.prefs === 'object') adoptPrefs(body.prefs)
+    }
+
+    // The host file is the durable copy: the desktop port changes on every
+    // start, and origin-scoped storage is lost with it. Applied once, at the
+    // first load, so a later snapshot cannot overwrite what the user just did.
+    let prefsLoaded = false
+    function adoptPrefs(prefs) {
+      if (prefsLoaded) return
+      prefsLoaded = true
+      if (typeof prefs.enabled === 'boolean') config.enabled = prefs.enabled
+      if (MODES.some((item) => item.key === prefs.mode)) config.mode = prefs.mode
+      if (PLAY_MODES.some((item) => item.key === prefs.playMode)) config.playMode = prefs.playMode
+      if (typeof prefs.volume === 'number' && isFinite(prefs.volume)) {
+        config.volume = Math.min(1, Math.max(0, prefs.volume))
+      }
+      if (typeof prefs.file === 'string') config.file = prefs.file
+      if (Array.isArray(prefs.order)) config.order = prefs.order.slice()
+      try {
+        audio.volume = config.volume
+        audio.loop = config.playMode === 'one'
+      } catch {}
+    }
+
+    let prefsTimer = 0
+    function savePrefs() {
+      if (prefsTimer) clearTimeout(prefsTimer)
+      prefsTimer = setTimeout(() => {
+        prefsTimer = 0
+        try {
+          fetch(PREFIX + '/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prefs: config }),
+          }).catch(() => {})
+        } catch {}
+      }, 600)
     }
 
     function loadFiles(force) {
@@ -169,25 +208,57 @@ try {
       return filesPromise
     }
 
+    // Playback order = the user's explicit order first, then anything the host
+    // returned that the order does not mention (new files land at the end).
+    function orderedFiles() {
+      if (!Array.isArray(config.order) || !config.order.length) return files
+      const out = []
+      const seen = {}
+      for (const name of config.order) {
+        if (files.indexOf(name) >= 0 && !seen[name]) {
+          out.push(name)
+          seen[name] = true
+        }
+      }
+      for (const name of files) {
+        if (!seen[name]) out.push(name)
+      }
+      return out
+    }
+
+    // Whether playback should be audible right now. `ended` used to rely on the
+    // wantPlay flag alone, which fade-out clears — so a track that finished
+    // while the answer was being written never came back.
+    function shouldPlayNow() {
+      if (!config.enabled || !isLeader) return false
+      if (config.mode === 'always') return true
+      if (config.mode === 'turn') {
+        return Boolean(lastRunning) && !inTextPhase() && !pausedForUser
+      }
+      return lastReasoningAt > 0 && Date.now() - lastReasoningAt < REASONING_IDLE_MS
+    }
+
     function currentTrack() {
-      if (!files.length) return ''
-      if (config.file && files.indexOf(config.file) >= 0) return config.file
-      return files[0]
+      const list = orderedFiles()
+      if (!list.length) return ''
+      if (config.file && list.indexOf(config.file) >= 0) return config.file
+      return list[0]
     }
 
     function nextTrackName() {
-      if (files.length <= 1) return currentTrack()
+      const list = orderedFiles()
+      if (list.length <= 1) return currentTrack()
       const current = currentTrack()
       if (config.playMode === 'shuffle') {
         let pick = current
         // Avoid replaying the same song; the guard keeps tiny folders cheap.
         for (let i = 0; i < 24 && pick === current; i += 1) {
-          pick = files[Math.floor(Math.random() * files.length)]
+          pick = list[Math.floor(Math.random() * list.length)]
         }
         return pick
       }
-      const at = files.indexOf(current)
-      return files[(at < 0 ? 0 : at + 1) % files.length]
+      const at = list.indexOf(current)
+      return list[(at < 0 ? 0 : at + 1) % list.length]
     }
 
     // `loop` covers the single-track case, so advancing only matters for
@@ -197,10 +268,17 @@ try {
       if (config.playMode === 'one') return
       const next = nextTrackName()
       if (!next) return
+      // Decide from the mode, not from wantPlay: a fade-out clears wantPlay, so
+      // a track that finished during the answer would otherwise stay silent.
+      const resume = shouldPlayNow()
       config.file = next
       lsWrite(LS.file, next)
+      savePrefs()
       audio.setAttribute('src', PREFIX + '/music/' + encodeURIComponent(next))
-      if (!wantPlay || !config.enabled || !isLeader) return
+      try {
+        audio.load()
+      } catch {}
+      if (!resume) return
       audio.volume = 0
       const attempt = audio.play()
       if (attempt && typeof attempt.then === 'function') {
@@ -681,6 +759,7 @@ try {
       const [dir, setDir] = React.useState(folder)
       const [list, setList] = React.useState(files)
       const [track, setTrack] = React.useState(config.file)
+      const [order, setOrder] = React.useState(() => orderedFiles())
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState('')
       const [manual, setManual] = React.useState('')
@@ -699,6 +778,7 @@ try {
         if (typeof body.dir === 'string') setDir(body.dir)
         setList(files)
         setTrack(config.file)
+        setOrder(orderedFiles())
         if (body.error) setError(body.error)
         else if (!body.cancelled) setError('')
       }
@@ -710,6 +790,7 @@ try {
           setDir(folder)
           setList(next)
           setTrack(config.file)
+          setOrder(orderedFiles())
         })
         return () => {
           alive = false
@@ -750,6 +831,7 @@ try {
         setEnabled(next)
         config.enabled = next
         lsWrite(LS.enabled, next ? '1' : '0')
+        savePrefs()
         settlePlayback()
       }
 
@@ -757,6 +839,7 @@ try {
         setMode(next)
         config.mode = next
         lsWrite(LS.mode, next)
+        savePrefs()
         settlePlayback()
       }
 
@@ -765,6 +848,7 @@ try {
         config.playMode = next
         lsWrite(LS.playMode, next)
         audio.loop = next === 'one'
+        savePrefs()
       }
 
       function changeVolume(next) {
@@ -772,12 +856,32 @@ try {
         config.volume = next
         audio.volume = next
         lsWrite(LS.volume, next)
+        savePrefs()
       }
 
       function changeTrack(next) {
         setTrack(next)
+        config.file = next
+        lsWrite(LS.file, next)
+        savePrefs()
         switchTrack(next)
       }
+
+      function moveTrack(name, delta) {
+        const list = orderedFiles().slice()
+        const at = list.indexOf(name)
+        const to = at + delta
+        if (at < 0 || to < 0 || to >= list.length) return
+        const swapped = list[to]
+        list[to] = list[at]
+        list[at] = swapped
+        config.order = list
+        setOrder(list)
+        setTrack(currentTrack())
+        savePrefs()
+      }
+
+      const rows = order.length ? order : orderedFiles()
 
       return React.createElement(
         'div',
@@ -937,7 +1041,12 @@ try {
         ),
         React.createElement(
           SettingRow,
-          { title: '曲目', desc: list.length ? `当前文件夹有 ${list.length} 首` : '这个文件夹里没有音频文件' },
+          {
+            title: '曲目',
+            desc: list.length
+              ? `共 ${list.length} 首，点一首切过去；↑ ↓ 调整顺序，「顺序播放」按这个次序走`
+              : '这个文件夹里没有音频文件',
+          },
           list.length === 0
             ? React.createElement(
                 'div',
@@ -945,14 +1054,65 @@ try {
                 '支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus。',
               )
             : React.createElement(
-                'select',
-                {
-                  value: track || list[0],
-                  onChange: (event) => changeTrack(event.target.value),
-                  style: { width: '100%', padding: '6px 8px', borderRadius: 6, fontSize: 13 },
-                },
-                list.map((name) =>
-                  React.createElement('option', { key: name, value: name }, name),
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                rows.map((name, index) =>
+                  React.createElement(
+                    'div',
+                    { key: name, style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                    React.createElement(
+                      'span',
+                      { style: { width: 18, fontSize: 12, opacity: 0.55, textAlign: 'right' } },
+                      String(index + 1),
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => changeTrack(name),
+                        title: name,
+                        style: {
+                          flex: 1,
+                          minWidth: 0,
+                          textAlign: 'left',
+                          padding: '5px 9px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          border:
+                            name === track
+                              ? '1px solid #2b6cf6'
+                              : '1px solid rgba(128,128,128,0.3)',
+                          background:
+                            name === track ? 'rgba(43,108,246,0.14)' : 'transparent',
+                          color: 'inherit',
+                        },
+                      },
+                      (name === track ? '▶ ' : '') + name,
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => moveTrack(name, -1),
+                        disabled: index === 0,
+                        title: '上移',
+                        style: buttonStyle(false),
+                      },
+                      '↑',
+                    ),
+                    React.createElement(
+                      'button',
+                      {
+                        onClick: () => moveTrack(name, 1),
+                        disabled: index === rows.length - 1,
+                        title: '下移',
+                        style: buttonStyle(false),
+                      },
+                      '↓',
+                    ),
+                  ),
                 ),
               ),
         ),
