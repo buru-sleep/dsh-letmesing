@@ -104,10 +104,6 @@ try {
     let fadeTimer = 0
     let lastReasoningAt = 0
     let lastRunning = false
-    // Set once answer text starts and cleared when the model moves on to a tool
-    // call, so the watchdog cannot restart music halfway through a written
-    // answer while the turn is still running.
-    let turnHadText = false
     // Set when the model asks the user something; later activity clears it.
     let pausedForUser = false
     // Last moment answer text arrived. A timestamp rather than a flag: when the
@@ -586,7 +582,6 @@ try {
         }
         if (type === 'text-delta' || type === 'text') {
           // The model is writing the answer: it is no longer "thinking".
-          turnHadText = true
           stopForText()
           continue
         }
@@ -612,12 +607,12 @@ try {
           continue
         }
         if (type === 'finish') {
-          turnHadText = false
-          pausedForUser = false
           if (config.mode === 'always') continue
           // A tool run usually means the user has to decide something — an
           // approval prompt — before the turn continues. That is their turn, so
           // go quiet here; the next reasoning burst brings the music back.
+          // pausedForUser deliberately survives this: a question still on screen
+          // keeps the music off until it is answered.
           scheduleStop()
         }
       }
@@ -1184,21 +1179,9 @@ try {
       // transition instead of leaving the track silent for the rest of the turn.
       const watchdog = setInterval(() => {
         if (!config.enabled) return
-        if (config.mode === 'reasoning') {
-          if (audio.paused || !lastReasoningAt) return
-          if (Date.now() - lastReasoningAt > REASONING_IDLE_MS) fadeOut()
-          return
-        }
-        if (
-          config.mode === 'turn' &&
-          lastRunning &&
-          !inTextPhase() &&
-          !pausedForUser &&
-          !turnHadText &&
-          audio.paused
-        ) {
-          resumePlayback()
-        }
+        if (config.mode !== 'reasoning') return
+        if (audio.paused || !lastReasoningAt) return
+        if (Date.now() - lastReasoningAt > REASONING_IDLE_MS) fadeOut()
       }, 350)
       ctx.effect(() => () => clearInterval(watchdog))
 
