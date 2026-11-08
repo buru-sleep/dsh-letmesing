@@ -393,11 +393,13 @@ if (window.__dsh_letmesing_loaded__ !== true) {
 
     // Diagnostic probe: off by default. Run `localStorage.setItem('letmesing.debug','1')`
     // in the console and reload when a chunk-level bug needs investigation.
+    // TEMPORARY: on by default while chasing "answer text does not fade out".
+    // Flip back to `=== '1'` before the release.
     const DEBUG = (() => {
       try {
-        return localStorage.getItem('letmesing.debug') === '1'
+        return localStorage.getItem('letmesing.debug') !== '0'
       } catch {
-        return false
+        return true
       }
     })()
 
@@ -967,6 +969,12 @@ if (window.__dsh_letmesing_loaded__ !== true) {
         sessionsApi = null
       }
       reportChunk('diag-init', sessionsApi ? 'sessions=ok' : 'sessions=null')
+      // Temporary probe: the config decides whether answer text can ever fade
+      // playback out, so record it alongside the chunk trace.
+      reportAlways(
+        'diag-config',
+        'mode=' + config.mode + ' playMode=' + config.playMode + ' enabled=' + (config.enabled ? 1 : 0),
+      )
       acquireLeadership()
 
       // Safety net. Reasoning mode: a burst that ends without a text chunk
