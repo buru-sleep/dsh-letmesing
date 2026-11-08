@@ -1,0 +1,102 @@
+# dsh-letmesing
+
+> 模型思考的时候，放你自己的音乐。
+
+一个 [DeepSeek Harness](https://github.com/deepseek-ai)（DSH）插件：当助手开始思考时自动播放你指定的背景音乐，思考结束自动淡出。
+
+名字致敬《Let Me Go》和 [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek)。
+
+---
+
+## 功能
+
+- **三种触发时机**，在设置里切换：
+  - `推理时`（默认）— 只有模型真的在推理时播放，正文输出、工具执行时静音
+  - `整轮运行` — 从你发出消息到回复结束，全程播放
+  - `常驻` — 一直播放，当普通播放器用
+- **自己选音乐**：设置页里点「选择文件夹」，指向你存放音乐的目录即可，支持 mp3 / m4a / aac / ogg / wav / flac / webm / opus
+- **淡入淡出**：进入 700ms 渐强，退出 420ms 渐弱，不会有硬切的突兀感
+- **单实例播放**：桌面端和浏览器同时开着时，只有先打开的那个窗口出声，另一个静默待命
+- **设置持久化**：音乐文件夹存在 `~/.dsh/letmesing/config.json`，不受桌面端端口变化影响
+
+## 安装
+
+> 需要 DSH `0.2.1-rc.2` 或更高版本。
+
+**方式一：让 DSH 帮你装（推荐）**
+
+把这个仓库克隆到本地，然后在对话里说：
+
+```
+帮我安装插件 D:\path\to\dsh-letmesing
+```
+
+助手会调用插件管理功能把它装进当前 profile。
+
+**方式二：手动**
+
+```bash
+git clone https://github.com/<your-name>/dsh-letmesing.git
+```
+
+然后在 DSH 的插件管理里把该目录作为 bundle 安装。
+
+安装后刷新页面，设置页应出现 **LetMeSing** 分区。
+
+## 使用
+
+1. 打开 设置 → LetMeSing
+2. 勾选「启用」
+3. 点「选择文件夹」，指向你的音乐目录（也可以直接粘贴路径）
+4. 选择「播放时机」
+5. 选一首曲目，发一条消息听听
+
+第一次使用需要点一下页面（浏览器的自动播放限制），之后就不用管了。
+
+## 配置项
+
+| 项 | 位置 | 说明 |
+| --- | --- | --- |
+| 启用 | `localStorage: letmesing.enabled` | 总开关 |
+| 播放时机 | `localStorage: letmesing.mode` | `reasoning` / `turn` / `always` |
+| 音量 | `localStorage: letmesing.volume` | 0–1 |
+| 曲目 | `localStorage: letmesing.file` | 文件名 |
+| 音乐文件夹 | `~/.dsh/letmesing/config.json` | Host 侧持久化，重启不丢 |
+
+> 为什么目录存在 Host 侧？因为桌面端每次启动端口是随机的，浏览器存储按源隔离，`localStorage` 在重启后会失效。
+
+## 工作原理
+
+- **Client 插件**监听当前会话的事件流（`ctx.sessions` → `binding(sessionId).eventSource`），
+  从 `reasoning-delta` 这类流式块判断「模型正在推理」。
+- **Host 插件**用 `webServer.register()` 暴露两个接口：
+  - `GET /dsh-letmesing/api/list` — 列出音乐文件夹里的音频
+  - `GET /dsh-letmesing/music/<file>` — 静态音频，支持 Range 请求
+- 播放本身交给浏览器的 `HTMLAudioElement`，不依赖任何本地播放器命令（afplay / ffplay 之类），所以三个平台上行为一致。
+
+## 已知限制
+
+- **只支持 Web 层**：桌面端和浏览器都能用；终端 TUI 形态没有页面，不生效。
+- **不会自动下载音乐**：请自备音频文件。仓库里不附带任何音频，避免版权问题。
+- **上游可能变更**：DSH 版本升级如果改了 slot 名或事件名，插件会静默降级（不崩，但不响），到时需要跟着更新。
+
+## 开发
+
+```bash
+# 语法自检
+node --check index.js
+node --check client.js
+
+# 改了 Host（index.js）后需要重载插件：
+# 插件管理里先禁用再启用，或重启 DSH
+# 改了 Client（client.js）后刷新页面即可
+```
+
+## 许可
+
+[MIT](./LICENSE)
+
+## 致谢
+
+- 《Let Me Go》— 罐装毕加索 / 星落落_oi，以及 B 站「大肥鱼」系列动画 PV
+- [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek) — 同族前辈，本项目的骨架参考
