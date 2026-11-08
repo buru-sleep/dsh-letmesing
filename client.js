@@ -942,12 +942,11 @@ try {
         ),
         React.createElement(
           SettingRow,
-          { title: '开发', desc: '改过代码后点一下即可重新加载界面，不必重启 DSH' },
-          React.createElement(
-            'button',
-            { onClick: () => location.reload(), style: buttonStyle(false) },
-            '重新加载界面',
-          ),
+          {
+            title: '开发',
+            desc: '改过插件代码后请重启 DSH 生效。页内重载会重跑整段 boot，插件模块重复导入会中止启动，所以这里不提供「重新加载界面」按钮。',
+          },
+          null,
         ),
         React.createElement(
           SettingRow,

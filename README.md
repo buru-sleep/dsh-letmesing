@@ -89,8 +89,10 @@ node --check client.js
 
 # 改了 Host（index.js）后需要重载插件：
 # 插件管理里先禁用再启用，或重启 DSH
-# 改了 Client（client.js）后点设置页的「重新加载界面」（桌面端没有 Ctrl+R）
-# 注意：模块注册要能承受 boot 重跑，插件里已加锁，别去掉
+# 改了 Client（client.js）后必须重启 DSH：桌面端没有 Ctrl+R，
+# 而设置页里的「重新加载界面」会在同一页面上下文重跑整段 boot，
+# 插件模块重复导入会中止启动（web boot: 1 entry did not activate），
+# 所以这个按钮已经从界面里移除
 ```
 
 ## 许可
