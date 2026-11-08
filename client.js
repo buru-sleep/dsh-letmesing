@@ -1,5 +1,28 @@
 // Re-running the boot script in the same page context would register this
 // module id a second time and fail the entire web boot, so latch it.
+// Surface boot failures where they can actually be read: the crash dialog only
+// prints "import failed", so every uncaught error and rejection goes to the
+// host log instead. This runs before anything else can throw.
+try {
+  const report = (type, message) => {
+    try {
+      fetch('/dsh-letmesing/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, sample: String(message).slice(0, 240), at: Date.now() }),
+      }).catch(() => {})
+    } catch {}
+  }
+  window.addEventListener('error', (event) => {
+    const error = event && (event.error || event.message)
+    report('win-error', (error && (error.stack || error.message || error)) || 'unknown')
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event && event.reason
+    report('win-rejection', (reason && (reason.stack || reason.message)) || String(reason || 'unknown'))
+  })
+} catch {}
+
 // Always (re-)register. A boot that re-runs in the same page context still
 // holds this module id, so the loader rejects the duplicate — harmless, and far
 // better than skipping the registration: a skipped entry stays inactive and
@@ -583,19 +606,13 @@ try {
           continue
         }
         if (type === 'finish') {
-          const kind = chunk.reason && chunk.reason.kind
           turnHadText = false
           pausedForUser = false
           if (config.mode === 'always') continue
-          if (kind === 'tool-calls') {
-            // More work follows — a tool run, and often a user approval prompt.
-            // The turn is not over, so this is exactly where the music should
-            // keep playing instead of fading out.
-            cancelStop()
-            resumePlayback()
-          } else {
-            scheduleStop()
-          }
+          // A tool run usually means the user has to decide something — an
+          // approval prompt — before the turn continues. That is their turn, so
+          // go quiet here; the next reasoning burst brings the music back.
+          scheduleStop()
         }
       }
     }
