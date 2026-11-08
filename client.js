@@ -1034,7 +1034,10 @@ try {
         null,
         React.createElement(
           SettingRow,
-          { title: 'LetMeSing', desc: '模型思考时播放你选定的背景音乐' },
+          {
+            title: 'LetMeSing',
+            desc: '模型思考时播放你选定的背景音乐 · 支持 mp3 / m4a / aac / ogg / oga / wav / flac / webm / opus',
+          },
           React.createElement(
             'label',
             { style: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 } },
