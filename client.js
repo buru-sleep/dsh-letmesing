@@ -65,6 +65,10 @@ window.__ModuleLoader__.load({
     let fadeTimer = 0
     let lastReasoningAt = 0
     let lastRunning = false
+    // Set when the model asks the user something; the next block resets it.
+    let pausedForUser = false
+    // True while the model is writing the answer instead of thinking.
+    let textPhase = false
     let files = []
     let folder = ''
     let filesPromise = null
@@ -275,13 +279,12 @@ window.__ModuleLoader__.load({
       }
       if (config.mode === 'always') {
         cancelStop()
-        startPlaying()
+        if (!pausedForUser) startPlaying()
         return
       }
       if (config.mode === 'turn') {
         if (running) {
-          cancelStop()
-          startPlaying()
+          resumePlayback()
         } else {
           scheduleStop()
         }
@@ -321,11 +324,19 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function markReasoning() {
-      lastReasoningAt = Date.now()
-      if (!config.enabled || config.mode !== 'reasoning') return
+    function resumePlayback() {
+      if (!config.enabled) return
+      if (pausedForUser || textPhase) return
       cancelStop()
       startPlaying()
+    }
+
+    function stopForText() {
+      // "always" means always; in the other modes the answer itself is silence.
+      if (config.mode === 'always') return
+      textPhase = true
+      cancelStop()
+      fadeOut()
     }
 
     // Diagnostic probe: off by default. Run `localStorage.setItem('letmesing.debug','1')`
@@ -379,16 +390,49 @@ window.__ModuleLoader__.load({
           sample = JSON.stringify(chunk).slice(0, 220)
         } catch {}
         reportChunk(type, sample)
+        if (type === 'block-start') {
+          pausedForUser = false
+          if (chunk.blockType === 'text') {
+            textPhase = true
+            stopForText()
+          } else {
+            textPhase = false
+            resumePlayback()
+          }
+          return
+        }
         if (type === 'reasoning-delta' || type === 'reasoning') {
-          markReasoning()
+          lastReasoningAt = Date.now()
+          resumePlayback()
           return
         }
         if (type === 'text-delta' || type === 'text') {
-          if (config.mode === 'reasoning' && !audio.paused) fadeOut()
+          // The model is writing the answer: it is no longer "thinking".
+          stopForText()
+          return
+        }
+        if (type === 'tool-call-delta') {
+          if (chunk.name === 'ask_user_question') {
+            pausedForUser = true
+            cancelStop()
+            fadeOut()
+            return
+          }
+          resumePlayback()
+          return
+        }
+        if (type === 'block-end') {
+          const block = chunk.block
+          if (block && block.type === 'tool-call' && block.name === 'ask_user_question') {
+            // Waiting on the user: go quiet until the next block starts.
+            pausedForUser = true
+            cancelStop()
+            fadeOut()
+          }
           return
         }
         if (type === 'finish') {
-          if (config.mode === 'reasoning') fadeOut()
+          if (config.mode !== 'always') scheduleStop()
           return
         }
       }
