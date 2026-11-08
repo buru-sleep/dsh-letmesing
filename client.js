@@ -376,9 +376,12 @@ window.__ModuleLoader__.load({
 
     function inspectChange(change) {
       if (!change || !Array.isArray(change.entries)) return
-      // Only the tail matters: `replace` can carry the whole history, and
-      // re-scanning it every frame would cost more as the session grows.
-      const start = Math.max(0, change.entries.length - 5)
+      // A single change can carry several chunks: a `replace` ships the whole
+      // window, and one turn boundary often delivers text-delta and the next
+      // block-start together. Inspect every entry in the tail in order —
+      // stopping at the first match would drop that block-start and leave
+      // playback silent for the rest of the turn.
+      const start = Math.max(0, change.entries.length - 12)
       for (let i = start; i < change.entries.length; i += 1) {
         const entry = change.entries[i]
         if (!entry || entry.type !== 'transient') continue
@@ -399,27 +402,27 @@ window.__ModuleLoader__.load({
             textPhase = false
             resumePlayback()
           }
-          return
+          continue
         }
         if (type === 'reasoning-delta' || type === 'reasoning') {
           lastReasoningAt = Date.now()
           resumePlayback()
-          return
+          continue
         }
         if (type === 'text-delta' || type === 'text') {
           // The model is writing the answer: it is no longer "thinking".
           stopForText()
-          return
+          continue
         }
         if (type === 'tool-call-delta') {
           if (chunk.name === 'ask_user_question') {
             pausedForUser = true
             cancelStop()
             fadeOut()
-            return
+            continue
           }
           resumePlayback()
-          return
+          continue
         }
         if (type === 'block-end') {
           const block = chunk.block
@@ -429,11 +432,10 @@ window.__ModuleLoader__.load({
             cancelStop()
             fadeOut()
           }
-          return
+          continue
         }
         if (type === 'finish') {
           if (config.mode !== 'always') scheduleStop()
-          return
         }
       }
     }
