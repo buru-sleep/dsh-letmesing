@@ -54,6 +54,10 @@ window.__ModuleLoader__.load({
     audio.preload = 'auto'
     audio.loop = true
     audio.volume = config.volume
+    audio.addEventListener('error', () => {
+      const code = audio.error ? audio.error.code : 0
+      reportChunk('audio-error', 'code=' + code)
+    })
 
     let unlocked = false
     let wantPlay = false
@@ -312,8 +316,19 @@ window.__ModuleLoader__.load({
       startPlaying()
     }
 
+    // Diagnostic probe: off by default. Run `localStorage.setItem('letmesing.debug','1')`
+    // in the console and reload when a chunk-level bug needs investigation.
+    const DEBUG = (() => {
+      try {
+        return localStorage.getItem('letmesing.debug') === '1'
+      } catch {
+        return false
+      }
+    })()
+
     let lastReportedType = ''
     function reportChunk(type, sample) {
+      if (!DEBUG) return
       if (!type || type === lastReportedType) return
       lastReportedType = type
       try {
@@ -327,7 +342,11 @@ window.__ModuleLoader__.load({
 
     function inspectChange(change) {
       if (!change || !Array.isArray(change.entries)) return
-      for (const entry of change.entries) {
+      // Only the tail matters: `replace` can carry the whole history, and
+      // re-scanning it every frame would cost more as the session grows.
+      const start = Math.max(0, change.entries.length - 5)
+      for (let i = start; i < change.entries.length; i += 1) {
+        const entry = change.entries[i]
         if (!entry || entry.type !== 'transient') continue
         const chunk = entry.event && entry.event.data && entry.event.data.chunk
         if (!chunk) continue
@@ -419,6 +438,12 @@ window.__ModuleLoader__.load({
         })
         return () => {
           alive = false
+          if (watched) {
+            try {
+              watched.unsubscribe()
+            } catch {}
+            watched = null
+          }
         }
       }, [])
 
@@ -486,10 +511,18 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState('')
       const [manual, setManual] = React.useState('')
+      const [leader, setLeader] = React.useState(isLeader)
+
+      React.useEffect(() => {
+        const timer = setInterval(() => setLeader(isLeader), 800)
+        return () => clearInterval(timer)
+      }, [])
 
       function absorb(body) {
         if (!body || typeof body !== 'object') return
+        const prevDir = folder
         adoptSnapshot(body)
+        if (prevDir && body.dir && body.dir !== prevDir) stopNow()
         if (typeof body.dir === 'string') setDir(body.dir)
         setList(files)
         setTrack(config.file)
@@ -557,7 +590,7 @@ window.__ModuleLoader__.load({
       function changeVolume(next) {
         setVolume(next)
         config.volume = next
-        if (!fadeTimer) audio.volume = next
+        audio.volume = next
         lsWrite(LS.volume, next)
       }
 
@@ -715,6 +748,18 @@ window.__ModuleLoader__.load({
                 ),
               ),
         ),
+        React.createElement(
+          SettingRow,
+          {
+            title: '播放窗口',
+            desc: leader ? '本窗口负责播放' : '另一个窗口正在播放，本窗口保持静默',
+          },
+          React.createElement(
+            'span',
+            { style: { fontSize: 12, opacity: 0.7 } },
+            leader ? '● 正在播放' : '○ 静默',
+          ),
+        ),
       )
     }
 
@@ -730,12 +775,13 @@ window.__ModuleLoader__.load({
       acquireLeadership()
 
       // Safety net: if a reasoning burst stops without a text chunk, fade out.
-      setInterval(() => {
+      const watchdog = setInterval(() => {
         if (!config.enabled || config.mode !== 'reasoning') return
         if (audio.paused) return
         if (!lastReasoningAt) return
         if (Date.now() - lastReasoningAt > REASONING_IDLE_MS) fadeOut()
       }, 350)
+      ctx.effect(() => () => clearInterval(watchdog))
 
       ctx.effect(() =>
         ctx.slots.inject('conversation.input.dock', () =>
