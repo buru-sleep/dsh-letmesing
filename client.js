@@ -788,6 +788,9 @@ try {
     function switchTrack(next) {
       config.file = next
       lsWrite(LS.file, next)
+      // Without this the pick only lives in memory: the next launch would fall
+      // back to whatever the host last stored.
+      savePrefs()
       // Picking a track must not start sound while the model is writing the
       // answer or a question is waiting on the user.
       try {
