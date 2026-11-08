@@ -525,8 +525,14 @@ try {
       }
     })()
 
+    let lastAlwaysReported = ''
     function reportAlways(type, sample) {
       if (!DEBUG) return
+      // Unlike reportChunk this is called on every text-delta, so the same
+      // diagnostic must not become one HTTP request per stream chunk.
+      const key = type + '|' + (sample || '')
+      if (key === lastAlwaysReported) return
+      lastAlwaysReported = key
       try {
         fetch(PREFIX + '/api/log', {
           method: 'POST',
@@ -550,18 +556,29 @@ try {
       } catch {}
     }
 
+    // The window is re-sent on every change, so a fixed tail scan replays events
+    // already handled — a stale tool-call block-start would then lift the pause a
+    // question had just set. Live chunk events carry a monotonic seq: use it as
+    // the cursor and fall back to scanning only when a seq is missing.
+    let lastHandledSeq = -1
+
     function inspectChange(change) {
       if (!change || !Array.isArray(change.entries)) return
       // A single change can carry several chunks: a `replace` ships the whole
       // window, and one turn boundary often delivers text-delta and the next
-      // block-start together. Inspect every entry in the tail in order —
-      // stopping at the first match would drop that block-start and leave
-      // playback silent for the rest of the turn.
-      const start = Math.max(0, change.entries.length - 12)
-      for (let i = start; i < change.entries.length; i += 1) {
+      // block-start together. Inspect every entry in order — stopping at the
+      // first match would drop that block-start and leave playback silent.
+      for (let i = 0; i < change.entries.length; i += 1) {
         const entry = change.entries[i]
         if (!entry || entry.type !== 'transient') continue
-        const chunk = entry.event && entry.event.data && entry.event.data.chunk
+        const event = entry.event
+        if (!event) continue
+        const seq = typeof event.seq === 'number' ? event.seq : null
+        if (seq !== null) {
+          if (seq <= lastHandledSeq) continue
+          lastHandledSeq = seq
+        }
+        const chunk = event.data && event.data.chunk
         if (!chunk) continue
         const type = chunk.type
         if (DEBUG) {
@@ -598,8 +615,13 @@ try {
             fadeOut(FADE_OUT_IDLE_MS)
             continue
           }
-          pausedForUser = false
-          resumePlayback()
+          // Only a named tool proves the question is gone. A follow-up delta
+          // carrying just argument fragments has no name, so resuming on those
+          // would lift the pause while the question card is still on screen.
+          if (chunk.name) {
+            pausedForUser = false
+            resumePlayback()
+          }
           continue
         }
         if (type === 'block-end') {

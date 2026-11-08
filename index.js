@@ -150,6 +150,24 @@ function readBody(req) {
   })
 }
 
+function notFound(res) {
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+  res.end('not found')
+}
+
+function pipeAudio(file, options, res) {
+  const stream = fs.createReadStream(file, options)
+  // Nobody listens to these today, and an unhandled stream error takes the whole
+  // host down. A file that vanished between stat and open should only cost this
+  // one response.
+  stream.on('error', () => {
+    try {
+      res.destroy()
+    } catch {}
+  })
+  stream.pipe(res)
+}
+
 function sendAudio(req, res, file) {
   const ext = path.extname(file).toLowerCase()
   const type = AUDIO_MIME[ext] ?? 'application/octet-stream'
@@ -157,8 +175,12 @@ function sendAudio(req, res, file) {
   try {
     stat = fs.statSync(file)
   } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-    res.end('not found')
+    notFound(res)
+    return
+  }
+  // Directories pass statSync; createReadStream then throws EISDIR asynchronously.
+  if (!stat.isFile()) {
+    notFound(res)
     return
   }
 
@@ -188,8 +210,9 @@ function sendAudio(req, res, file) {
       'Content-Range': `bytes ${start}-${end}/${stat.size}`,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
     })
-    fs.createReadStream(file, { start, end }).pipe(res)
+    pipeAudio(file, { start, end }, res)
     return
   }
 
@@ -198,8 +221,26 @@ function sendAudio(req, res, file) {
     'Content-Length': stat.size,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-cache',
+    'X-Content-Type-Options': 'nosniff',
   })
-  fs.createReadStream(file).pipe(res)
+  pipeAudio(file, undefined, res)
+}
+
+// A page the user happens to have open must not be able to repoint the music
+// folder or flood the log with a plain cross-site request, so every write has to
+// be same-origin JSON.
+function guardWrite(req, res) {
+  const site = req.headers['sec-fetch-site']
+  if (site && site !== 'same-origin') {
+    sendJson(res, 403, { error: 'cross-origin write rejected' })
+    return false
+  }
+  const type = String(req.headers['content-type'] || '').split(';')[0].trim()
+  if (type !== 'application/json') {
+    sendJson(res, 415, { error: 'json body required' })
+    return false
+  }
+  return true
 }
 
 function snapshot() {
@@ -223,6 +264,7 @@ export function apply(ctx) {
       path: `${PREFIX}/api/config`,
       handler(req, res) {
         if (req.method === 'POST') {
+          if (!guardWrite(req, res)) return
           readBody(req).then((body) => {
             const patch = {}
             if (typeof body.dir === 'string') {
@@ -306,6 +348,7 @@ export function apply(ctx) {
       path: `${PREFIX}/api/log`,
       handler(req, res) {
         if (req.method === 'POST') {
+          if (!guardWrite(req, res)) return
           readBody(req).then((body) => {
             if (body && typeof body.type === 'string') {
               chunkLog.push({
