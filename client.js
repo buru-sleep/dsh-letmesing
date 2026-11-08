@@ -255,6 +255,10 @@ window.__ModuleLoader__.load({
     }
 
     function applyRunning(running) {
+      reportAlways(
+        'running',
+        'v=' + (running ? 1 : 0) + ' mode=' + config.mode + ' paused=' + (audio.paused ? 1 : 0),
+      )
       lastRunning = !!running
       if (!config.enabled) {
         cancelStop()
@@ -320,11 +324,22 @@ window.__ModuleLoader__.load({
     // in the console and reload when a chunk-level bug needs investigation.
     const DEBUG = (() => {
       try {
-        return localStorage.getItem('letmesing.debug') === '1'
+        return localStorage.getItem('letmesing.debug') !== '0'
       } catch {
-        return false
+        return true
       }
     })()
+
+    function reportAlways(type, sample) {
+      if (!DEBUG) return
+      try {
+        fetch(PREFIX + '/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, sample: sample || '', at: Date.now() }),
+        }).catch(() => {})
+      } catch {}
+    }
 
     let lastReportedType = ''
     function reportChunk(type, sample) {
@@ -385,6 +400,11 @@ window.__ModuleLoader__.load({
         try {
           watched.unsubscribe()
         } catch {}
+        if (watched.sessionUnsub) {
+          try {
+            watched.sessionUnsub()
+          } catch {}
+        }
         watched = null
       }
       let binding
@@ -410,7 +430,25 @@ window.__ModuleLoader__.load({
         } catch {}
         if (window_) inspectChange(window_.change)
       })
-      watched = { sessionId, unsubscribe }
+      // Slot props can lag behind the live snapshot, so read `running` from the
+      // session face itself; this is what actually stops playback when a turn ends.
+      let sessionUnsub = null
+      const face = binding.session
+      if (face && typeof face.getSnapshot === 'function' && typeof face.subscribe === 'function') {
+        let snap = null
+        try {
+          snap = face.getSnapshot()
+        } catch {}
+        if (snap) applyRunning(snap.running)
+        sessionUnsub = face.subscribe(() => {
+          let next = null
+          try {
+            next = face.getSnapshot()
+          } catch {}
+          if (next) applyRunning(next.running)
+        })
+      }
+      watched = { sessionId, unsubscribe, sessionUnsub }
     }
 
     function switchTrack(next) {
@@ -442,8 +480,16 @@ window.__ModuleLoader__.load({
             try {
               watched.unsubscribe()
             } catch {}
+            if (watched.sessionUnsub) {
+              try {
+                watched.sessionUnsub()
+              } catch {}
+            }
             watched = null
           }
+          // Nobody drives the audio once this mount goes away; leaving it
+          // running is how "the model stopped thinking but music kept playing" happens.
+          stopNow()
         }
       }, [])
 
