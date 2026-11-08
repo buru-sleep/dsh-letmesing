@@ -1,8 +1,10 @@
 // Re-running the boot script in the same page context would register this
 // module id a second time and fail the entire web boot, so latch it.
-if (window.__dsh_letmesing_loaded__ !== true) {
-  window.__dsh_letmesing_loaded__ = true
-
+// Always (re-)register. A boot that re-runs in the same page context still
+// holds this module id, so the loader rejects the duplicate — harmless, and far
+// better than skipping the registration: a skipped entry stays inactive and
+// aborts the whole web boot.
+try {
   window.__ModuleLoader__.load({
   id: 'dsh-letmesing',
   factory(require) {
@@ -277,7 +279,12 @@ if (window.__dsh_letmesing_loaded__ !== true) {
     }
 
     function fadeOut() {
-      if (fadeTimer || audio.paused) return
+      if (audio.paused) return
+      // A fade-in may still be running — the answer can start inside its 700 ms.
+      // Cancel it first, otherwise the early return below leaves the track
+      // climbing back to full volume and it never fades.
+      cancelFade()
+      reportAlways('fade-out', 'paused=' + audio.paused + ' vol=' + audio.volume.toFixed(2))
       wantPlay = false
       const from = audio.volume
       const startedAt = Date.now()
@@ -388,6 +395,10 @@ if (window.__dsh_letmesing_loaded__ !== true) {
       if (config.mode === 'always') return
       lastTextAt = Date.now()
       cancelStop()
+      reportAlways(
+        'text-stop',
+        'mode=' + config.mode + ' paused=' + audio.paused + ' vol=' + audio.volume.toFixed(2),
+      )
       fadeOut()
     }
 
@@ -1040,4 +1051,6 @@ if (window.__dsh_letmesing_loaded__ !== true) {
     }
   },
   })
+} catch (error) {
+  // Already registered by an earlier boot in this page: keep that one.
 }
