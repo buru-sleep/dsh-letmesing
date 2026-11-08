@@ -4,7 +4,7 @@
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai)（DSH）插件：当助手开始思考时自动播放你指定的背景音乐，思考结束自动淡出。
 
-名字致敬《Let Me Go》和 [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek)。
+名字致敬[《Let Me Go》](https://www.bilibili.com/video/BV1XbY66nEWr)和 [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek)。
 
 ---
 
