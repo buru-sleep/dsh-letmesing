@@ -55,15 +55,29 @@ git clone https://github.com/<your-name>/dsh-letmesing.git
 
 ## 配置项
 
-| 项 | 位置 | 说明 |
-| --- | --- | --- |
-| 启用 | `localStorage: letmesing.enabled` | 总开关 |
-| 播放时机 | `localStorage: letmesing.mode` | `turn`（默认）/ `reasoning` / `always` |
-| 音量 | `localStorage: letmesing.volume` | 0–1 |
-| 曲目 | `localStorage: letmesing.file` | 文件名 |
-| 音乐文件夹 | `~/.dsh/letmesing/config.json` | Host 侧持久化，重启不丢 |
+| 项 | 说明 |
+| --- | --- |
+| 启用 | 总开关 |
+| 播放时机 | `turn`（默认）/ `reasoning` / `always` |
+| 播放方式 | `one` 单曲循环（默认）/ `shuffle` 随机 / `sequence` 顺序 |
+| 音量 | 0–1 |
+| 曲目 | 文件名；列表里可以上下移动调整顺序 |
+| 音乐文件夹 | 本地目录路径 |
 
-> 为什么目录存在 Host 侧？因为桌面端每次启动端口是随机的，浏览器存储按源隔离，`localStorage` 在重启后会失效。
+所有这些都存在 Host 侧的 `~/.dsh/letmesing/config.json`，不是只写浏览器 `localStorage`。
+
+> 为什么？桌面端每次启动端口是随机的，浏览器存储按源隔离，`localStorage` 在重启后会失效。
+
+## 什么时候响、什么时候停
+
+| 时机 | 行为 |
+| --- | --- |
+| 模型开始推理 | 淡入（700 ms） |
+| 模型开始写正文 | 淡出（420 ms）——写给你看的时候不打扰 |
+| 工具调用 | 这一轮输出结束即静音，下一段推理再回来 |
+| 需要你审批 / 提问 | 静音，直到你答完（淡出 900 ms） |
+| 一轮结束 | 淡出（900 ms） |
+| 常驻模式 | 以上都不适用，一直响 |
 
 ## 工作原理
 
