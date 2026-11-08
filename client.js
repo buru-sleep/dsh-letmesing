@@ -16,6 +16,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
       mode: 'letmesing.mode',
       volume: 'letmesing.volume',
       file: 'letmesing.file',
+      playMode: 'letmesing.playMode',
     }
     const FADE_MS = 420
     const FADE_IN_MS = 700
@@ -55,11 +56,15 @@ if (window.__dsh_letmesing_loaded__ !== true) {
       mode: lsString(LS.mode, 'turn'),
       volume: Math.min(1, Math.max(0, lsNumber(LS.volume, 0.45))),
       file: lsString(LS.file, ''),
+      // 'one'      = repeat the current track (default)
+      // 'shuffle'  = pick a random other track when one ends
+      // 'sequence' = play the folder in order, wrapping at the end
+      playMode: lsString(LS.playMode, 'one'),
     }
 
     const audio = new Audio()
     audio.preload = 'auto'
-    audio.loop = true
+    audio.loop = config.playMode === 'one'
     audio.volume = config.volume
     audio.addEventListener('error', () => {
       const code = audio.error ? audio.error.code : 0
@@ -167,6 +172,41 @@ if (window.__dsh_letmesing_loaded__ !== true) {
       if (config.file && files.indexOf(config.file) >= 0) return config.file
       return files[0]
     }
+
+    function nextTrackName() {
+      if (files.length <= 1) return currentTrack()
+      const current = currentTrack()
+      if (config.playMode === 'shuffle') {
+        let pick = current
+        // Avoid replaying the same song; the guard keeps tiny folders cheap.
+        for (let i = 0; i < 24 && pick === current; i += 1) {
+          pick = files[Math.floor(Math.random() * files.length)]
+        }
+        return pick
+      }
+      const at = files.indexOf(current)
+      return files[(at < 0 ? 0 : at + 1) % files.length]
+    }
+
+    // `loop` covers the single-track case, so advancing only matters for
+    // shuffle and sequence. Playback continues only if it was wanted already:
+    // a track that ends during a fade-out should stay silent.
+    audio.addEventListener('ended', () => {
+      if (config.playMode === 'one') return
+      const next = nextTrackName()
+      if (!next) return
+      config.file = next
+      lsWrite(LS.file, next)
+      audio.setAttribute('src', PREFIX + '/music/' + encodeURIComponent(next))
+      if (!wantPlay || !config.enabled || !isLeader) return
+      audio.volume = 0
+      const attempt = audio.play()
+      if (attempt && typeof attempt.then === 'function') {
+        attempt.then(() => fadeIn(), () => {})
+      } else {
+        fadeIn()
+      }
+    })
 
     function cancelFade() {
       if (fadeTimer) {
@@ -614,9 +654,16 @@ if (window.__dsh_letmesing_loaded__ !== true) {
       { key: 'always', label: '常驻', hint: '打开页面就一直播放' },
     ]
 
+    const PLAY_MODES = [
+      { key: 'one', label: '单曲循环', hint: '一直重复当前这一首（默认）' },
+      { key: 'shuffle', label: '随机播放', hint: '一首放完，随机换一首' },
+      { key: 'sequence', label: '顺序播放', hint: '一首放完，播列表里的下一首，到末尾回到开头' },
+    ]
+
     function LetMeSingSettings() {
       const [enabled, setEnabled] = React.useState(config.enabled)
       const [mode, setMode] = React.useState(config.mode)
+      const [playMode, setPlayMode] = React.useState(config.playMode)
       const [volume, setVolume] = React.useState(config.volume)
       const [dir, setDir] = React.useState(folder)
       const [list, setList] = React.useState(files)
@@ -700,6 +747,13 @@ if (window.__dsh_letmesing_loaded__ !== true) {
         settlePlayback()
       }
 
+      function changePlayMode(next) {
+        setPlayMode(next)
+        config.playMode = next
+        lsWrite(LS.playMode, next)
+        audio.loop = next === 'one'
+      }
+
       function changeVolume(next) {
         setVolume(next)
         config.volume = next
@@ -752,6 +806,25 @@ if (window.__dsh_letmesing_loaded__ !== true) {
                   key: item.key,
                   onClick: () => changeMode(item.key),
                   style: buttonStyle(mode === item.key),
+                },
+                item.label,
+              ),
+            ),
+          ),
+        ),
+        React.createElement(
+          SettingRow,
+          { title: '播放方式', desc: PLAY_MODES.find((item) => item.key === playMode)?.hint || '' },
+          React.createElement(
+            'div',
+            { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            PLAY_MODES.map((item) =>
+              React.createElement(
+                'button',
+                {
+                  key: item.key,
+                  onClick: () => changePlayMode(item.key),
+                  style: buttonStyle(playMode === item.key),
                 },
                 item.label,
               ),
