@@ -1,0 +1,43 @@
+{
+  "name": "dsh-letmesing",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: play your own background music while the model is thinking",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "assets",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "engines": {
+    "node": ">=20.3"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "music",
+    "bgm"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

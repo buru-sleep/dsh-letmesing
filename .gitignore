@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 用户的音频文件不入库（版权与体积原因）
+assets/music/*
+!assets/music/.gitkeep
+*.mp3
+*.m4a
+*.flac
+*.wav
+*.ogg
+*.opus
