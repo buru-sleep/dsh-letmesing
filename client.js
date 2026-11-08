@@ -346,10 +346,6 @@ try {
     function startPlaying() {
       if (!config.enabled) return
       if (!isLeader) return
-      if (!unlocked) {
-        wantPlay = true
-        return
-      }
       const track = currentTrack()
       if (!track) return
       wantPlay = true
@@ -359,10 +355,20 @@ try {
       if (audio.paused) {
         cancelFade()
         audio.volume = 0
+        // Try even without a recorded gesture: the page may already have one
+        // from earlier, while this module instance never saw it — a hot reload
+        // drops module state, not the browser's per-page gesture. Only a real
+        // refusal waits for a click.
         const attempt = audio.play()
         if (attempt && typeof attempt.then === 'function') {
-          attempt.then(() => fadeIn(), () => {})
+          attempt.then(() => {
+            unlocked = true
+            fadeIn()
+          }, () => {
+            wantPlay = true
+          })
         } else {
+          unlocked = true
           fadeIn()
         }
         return
