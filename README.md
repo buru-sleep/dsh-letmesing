@@ -41,7 +41,7 @@ git clone https://github.com/<your-name>/dsh-letmesing.git
 
 然后在 DSH 的插件管理里把该目录作为 bundle 安装。
 
-安装后刷新页面，设置页应出现 **LetMeSing** 分区。
+安装后需要**重启 DSH**（桌面端没有刷新按钮，Client 代码在启动时加载）。重启后打开 设置 → LetMeSing。
 
 ## 使用
 
