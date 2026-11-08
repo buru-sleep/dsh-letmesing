@@ -343,9 +343,9 @@ window.__ModuleLoader__.load({
     // in the console and reload when a chunk-level bug needs investigation.
     const DEBUG = (() => {
       try {
-        return localStorage.getItem('letmesing.debug') !== '0'
+        return localStorage.getItem('letmesing.debug') === '1'
       } catch {
-        return true
+        return false
       }
     })()
 

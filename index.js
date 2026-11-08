@@ -31,20 +31,27 @@ const AUDIO_MIME = {
 
 const AUDIO_RE = /\.(mp3|m4a|aac|ogg|oga|wav|flac|webm|opus)$/i
 
+// The config file is read on every music request, so keep the resolved folder
+// in memory and refresh it only when this process writes a new value.
+let configCache = null
+
 function readConfig() {
+  if (configCache) return configCache
   try {
     const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))
     const dir = typeof parsed?.dir === 'string' ? parsed.dir.trim() : ''
-    return { dir: dir || DEFAULT_DIR }
+    configCache = { dir: dir || DEFAULT_DIR }
   } catch {
-    return { dir: DEFAULT_DIR }
+    configCache = { dir: DEFAULT_DIR }
   }
+  return configCache
 }
 
 function writeConfig(next) {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true })
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8')
+    configCache = { dir: next.dir }
     return true
   } catch (error) {
     throw new Error(`cannot write ${CONFIG_FILE}: ${error?.message ?? error}`)
@@ -66,14 +73,20 @@ function musicDir() {
   return existingDir(DEFAULT_DIR) ? DEFAULT_DIR : ''
 }
 
+// A folder of thousands of tracks should not turn into a huge listing: cap the
+// result so /api/list stays cheap no matter what folder the user picks.
+const MAX_TRACKS = 2000
+
 function listMusic(dir) {
   if (!dir) return []
   try {
-    return fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && AUDIO_RE.test(entry.name))
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b))
+    const names = []
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !AUDIO_RE.test(entry.name)) continue
+      names.push(entry.name)
+      if (names.length >= MAX_TRACKS) break
+    }
+    return names.sort((a, b) => a.localeCompare(b))
   } catch {
     return []
   }
