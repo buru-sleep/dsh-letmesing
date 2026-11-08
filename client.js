@@ -76,18 +76,27 @@ try {
       } catch {}
     }
 
+    // Storage is read back, so it may still hold whatever an older version
+    // wrote. Unknown values fall back instead of silently landing in a mode
+    // branch nobody meant to pick.
+    const MODE_KEYS = ['turn', 'reasoning', 'always']
+    const PLAY_MODE_KEYS = ['one', 'shuffle', 'sequence']
+    function pickKey(allowed, value, fallback) {
+      return allowed.indexOf(value) >= 0 ? value : fallback
+    }
+
     const config = {
       enabled: lsBool(LS.enabled, true),
       // 'turn'      = whenever the whole turn is running (default)
       // 'reasoning' = only while the model is actually thinking
       // 'always'    = always
-      mode: lsString(LS.mode, 'turn'),
+      mode: pickKey(MODE_KEYS, lsString(LS.mode, 'turn'), 'turn'),
       volume: Math.min(1, Math.max(0, lsNumber(LS.volume, 0.45))),
       file: lsString(LS.file, ''),
       // 'one'      = repeat the current track (default)
       // 'shuffle'  = pick a random other track when one ends
       // 'sequence' = play the folder in order, wrapping at the end
-      playMode: lsString(LS.playMode, 'one'),
+      playMode: pickKey(PLAY_MODE_KEYS, lsString(LS.playMode, 'one'), 'one'),
       // User-chosen playback order; empty means "the order the host returned".
       order: [],
     }
@@ -101,7 +110,6 @@ try {
       reportChunk('audio-error', 'code=' + code)
     })
 
-    let unlocked = false
     let wantPlay = false
     let stopTimer = 0
     let fadeTimer = 0
@@ -153,22 +161,33 @@ try {
         try {
           stopNow()
         } catch {}
-        setInterval(() => {
-          if (isLeader) return
+        // A second window owns playback. Keep trying, but stop trying once this
+        // one gets the lock — the interval used to outlive that for good.
+        const retry = setInterval(() => {
+          if (isLeader) {
+            clearInterval(retry)
+            return
+          }
           holdLockOnce().catch(() => {})
         }, 3000)
       })
     }
 
     function unlock() {
-      unlocked = true
       if (wantPlay) startPlaying()
     }
 
-    try {
-      window.addEventListener('pointerdown', unlock, { once: true })
-      window.addEventListener('keydown', unlock, { once: true })
-    } catch {}
+    // The unlock listeners are one-shot, so a refused play() has to re-arm them;
+    // otherwise a page that spent its gesture while nothing wanted to play can
+    // never start again without a reload.
+    function armUnlock() {
+      try {
+        window.addEventListener('pointerdown', unlock, { once: true })
+        window.addEventListener('keydown', unlock, { once: true })
+      } catch {}
+    }
+
+    armUnlock()
 
     function adoptSnapshot(body) {
       if (!body || typeof body !== 'object') return
@@ -178,6 +197,7 @@ try {
         if (files.length && files.indexOf(config.file) < 0) {
           config.file = files[0]
           lsWrite(LS.file, config.file)
+          savePrefs()
         }
       }
       if (body.prefs && typeof body.prefs === 'object') adoptPrefs(body.prefs)
@@ -228,8 +248,10 @@ try {
           return files
         })
         .catch(() => {
-          files = []
-          return files
+          // Do not cache the failure: one transient error used to silence the
+          // plugin for the rest of the page's life.
+          filesPromise = null
+          return files || []
         })
       return filesPromise
     }
@@ -239,7 +261,9 @@ try {
     function orderedFiles() {
       if (!Array.isArray(config.order) || !config.order.length) return files
       const out = []
-      const seen = {}
+      // Null prototype: a file literally named `__proto__` would otherwise be
+      // swallowed by the inherited accessor and vanish from the list.
+      const seen = Object.create(null)
       for (const name of config.order) {
         if (files.indexOf(name) >= 0 && !seen[name]) {
           out.push(name)
@@ -361,13 +385,12 @@ try {
         const attempt = audio.play()
         if (attempt && typeof attempt.then === 'function') {
           attempt.then(() => {
-            unlocked = true
             fadeIn()
           }, () => {
             wantPlay = true
+            armUnlock()
           })
         } else {
-          unlocked = true
           fadeIn()
         }
         return
@@ -408,7 +431,9 @@ try {
           try {
             audio.pause()
           } catch {}
-          audio.volume = config.volume
+          // Leave it at zero so the next start fades up from silence instead of
+          // snapping back to a level the user may have just overridden.
+          audio.volume = 0
         }
       }, 40)
     }
@@ -513,26 +538,19 @@ try {
       fadeOut()
     }
 
-    // Diagnostic probe: off by default. Run `localStorage.setItem('letmesing.debug','1')`
-    // in the console and reload when a chunk-level bug needs investigation.
-    // TEMPORARY: on by default while chasing "answer text does not fade out".
-    // Flip back to `=== '1'` before the release.
+    // Diagnostic probe: off by default. Run
+    // `localStorage.setItem('letmesing.debug','1')` in the console and reload when
+    // a chunk-level bug needs investigating.
     const DEBUG = (() => {
       try {
-        return localStorage.getItem('letmesing.debug') !== '0'
+        return localStorage.getItem('letmesing.debug') === '1'
       } catch {
-        return true
+        return false
       }
     })()
 
-    let lastAlwaysReported = ''
-    function reportAlways(type, sample) {
+    function postLog(type, sample) {
       if (!DEBUG) return
-      // Unlike reportChunk this is called on every text-delta, so the same
-      // diagnostic must not become one HTTP request per stream chunk.
-      const key = type + '|' + (sample || '')
-      if (key === lastAlwaysReported) return
-      lastAlwaysReported = key
       try {
         fetch(PREFIX + '/api/log', {
           method: 'POST',
@@ -542,18 +560,21 @@ try {
       } catch {}
     }
 
+    let lastAlwaysReported = ''
+    function reportAlways(type, sample) {
+      // Unlike reportChunk this is called on every text-delta, so the same
+      // diagnostic must not become one HTTP request per stream chunk.
+      const key = type + '|' + (sample || '')
+      if (key === lastAlwaysReported) return
+      lastAlwaysReported = key
+      postLog(type, sample)
+    }
+
     let lastReportedType = ''
     function reportChunk(type, sample) {
-      if (!DEBUG) return
       if (!type || type === lastReportedType) return
       lastReportedType = type
-      try {
-        fetch(PREFIX + '/api/log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type, sample: sample || '', at: Date.now() }),
-        }).catch(() => {})
-      } catch {}
+      postLog(type, sample)
     }
 
     // The window is re-sent on every change, so a fixed tail scan replays events
@@ -714,12 +735,12 @@ try {
     function switchTrack(next) {
       config.file = next
       lsWrite(LS.file, next)
-      if (!audio.paused || config.mode === 'always') {
-        try {
-          audio.pause()
-        } catch {}
-        startPlaying()
-      }
+      // Picking a track must not start sound while the model is writing the
+      // answer or a question is waiting on the user.
+      try {
+        audio.pause()
+      } catch {}
+      if (shouldPlayNow()) startPlaying()
     }
 
     function MusicController(props) {
@@ -916,6 +937,8 @@ try {
       function changeVolume(next) {
         setVolume(next)
         config.volume = next
+        // A fade in flight would overwrite the slider on its next tick.
+        cancelFade()
         audio.volume = next
         lsWrite(LS.volume, next)
         savePrefs()
@@ -1254,5 +1277,16 @@ try {
   },
   })
 } catch (error) {
-  // Already registered by an earlier boot in this page: keep that one.
+  // Already registered by an earlier boot in this page: keep that one. Anything
+  // else means this plugin simply will not appear, so say so somewhere readable.
+  const message = String((error && error.message) || error)
+  if (!/already|duplicate|registered/i.test(message)) {
+    try {
+      fetch('/dsh-letmesing/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'boot-error', sample: message.slice(0, 240), at: Date.now() }),
+      }).catch(() => {})
+    } catch {}
+  }
 }

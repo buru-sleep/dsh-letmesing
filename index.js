@@ -112,9 +112,11 @@ function listMusic(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isFile() || !AUDIO_RE.test(entry.name)) continue
       names.push(entry.name)
-      if (names.length >= MAX_TRACKS) break
     }
-    return names.sort((a, b) => a.localeCompare(b))
+    // Sort first, then cap: breaking out of readdir order first returned an
+    // arbitrary slice of a large folder.
+    names.sort((a, b) => a.localeCompare(b))
+    return names.slice(0, MAX_TRACKS)
   } catch {
     return []
   }
