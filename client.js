@@ -464,9 +464,27 @@ try {
       if (audio.volume < config.volume - 0.001) fadeIn()
     }
 
+    // A stopped element keeps its decoded track in memory. The spare element is
+    // only useful mid-crossfade, so drop its source whenever playback stops for
+    // real — a few MB of decoder buffer per idle window adds up.
+    function releaseSpare() {
+      const el = spare
+      if (!el.getAttribute('src')) return
+      cancelFade(el)
+      try {
+        el.pause()
+      } catch {}
+      el.removeAttribute('src')
+      try {
+        el.load()
+      } catch {}
+      el.volume = 0
+    }
+
     function stopNow() {
       wantPlay = false
       cancelFade()
+      releaseSpare()
       try {
         audio.pause()
       } catch {}
