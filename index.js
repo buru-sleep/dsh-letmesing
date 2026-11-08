@@ -165,8 +165,18 @@ function sendAudio(req, res, file) {
   const range = req.headers.range
   const match = typeof range === 'string' ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null
   if (match) {
-    const start = match[1] ? Number(match[1]) : 0
-    const end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1
+    const rawStart = match[1]
+    const rawEnd = match[2]
+    let start
+    let end
+    if (!rawStart && rawEnd) {
+      // Suffix form `bytes=-N` means the last N bytes, not bytes 0..N.
+      start = Math.max(0, stat.size - Number(rawEnd))
+      end = stat.size - 1
+    } else {
+      start = rawStart ? Number(rawStart) : 0
+      end = rawEnd ? Math.min(Number(rawEnd), stat.size - 1) : stat.size - 1
+    }
     if (start > end || start >= stat.size) {
       res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
       res.end()
@@ -326,7 +336,9 @@ export function apply(ctx) {
           )
           const safe = path.basename(raw)
           const dir = musicDir()
-          if (!safe || !dir) {
+          // Only audio leaves this route: the folder is user-chosen and may hold
+          // unrelated files, so serving anything else would leak them.
+          if (!safe || !dir || !AUDIO_RE.test(safe)) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
             res.end('not found')
             return
