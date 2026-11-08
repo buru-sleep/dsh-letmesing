@@ -6,6 +6,8 @@
 
 名字致敬[《Let Me Go》](https://www.bilibili.com/video/BV1XbY66nEWr)和 [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek)。
 
+(本项目全程dsh制作，共计消耗138.5Mtoken)
+
 ---
 
 ## 功能
