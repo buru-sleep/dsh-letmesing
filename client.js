@@ -20,6 +20,8 @@ if (window.__dsh_letmesing_loaded__ !== true) {
     const FADE_MS = 420
     const FADE_IN_MS = 700
     const REASONING_IDLE_MS = 1200
+    // How long answer text keeps playback silent after the last text chunk.
+    const TEXT_PHASE_MS = 1500
 
     function lsString(key, fallback) {
       try {
@@ -70,10 +72,15 @@ if (window.__dsh_letmesing_loaded__ !== true) {
     let fadeTimer = 0
     let lastReasoningAt = 0
     let lastRunning = false
-    // Set when the model asks the user something; the next block resets it.
+    // Set when the model asks the user something; later activity clears it.
     let pausedForUser = false
-    // True while the model is writing the answer instead of thinking.
-    let textPhase = false
+    // Last moment answer text arrived. A timestamp rather than a flag: when the
+    // matching block-start is missed the phase expires on its own instead of
+    // keeping playback silent for the rest of the turn.
+    let lastTextAt = 0
+    function inTextPhase() {
+      return lastTextAt > 0 && Date.now() - lastTextAt < TEXT_PHASE_MS
+    }
     let files = []
     let folder = ''
     let filesPromise = null
@@ -331,7 +338,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
 
     function resumePlayback() {
       if (!config.enabled) return
-      if (pausedForUser || textPhase) return
+      if (pausedForUser || inTextPhase()) return
       cancelStop()
       startPlaying()
     }
@@ -339,7 +346,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
     function stopForText() {
       // "always" means always; in the other modes the answer itself is silence.
       if (config.mode === 'always') return
-      textPhase = true
+      lastTextAt = Date.now()
       cancelStop()
       fadeOut()
     }
@@ -401,15 +408,14 @@ if (window.__dsh_letmesing_loaded__ !== true) {
         if (type === 'block-start') {
           pausedForUser = false
           if (chunk.blockType === 'text') {
-            textPhase = true
             stopForText()
           } else {
-            textPhase = false
             resumePlayback()
           }
           continue
         }
         if (type === 'reasoning-delta' || type === 'reasoning') {
+          pausedForUser = false
           lastReasoningAt = Date.now()
           resumePlayback()
           continue
@@ -426,6 +432,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
             fadeOut()
             continue
           }
+          pausedForUser = false
           resumePlayback()
           continue
         }
@@ -440,6 +447,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
           continue
         }
         if (type === 'finish') {
+          pausedForUser = false
           if (config.mode !== 'always') scheduleStop()
         }
       }
@@ -902,7 +910,7 @@ if (window.__dsh_letmesing_loaded__ !== true) {
         if (
           config.mode === 'turn' &&
           lastRunning &&
-          !textPhase &&
+          !inTextPhase() &&
           !pausedForUser &&
           audio.paused
         ) {
