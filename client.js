@@ -1,4 +1,9 @@
-window.__ModuleLoader__.load({
+// Re-running the boot script in the same page context would register this
+// module id a second time and fail the entire web boot, so latch it.
+if (window.__dsh_letmesing_loaded__ !== true) {
+  window.__dsh_letmesing_loaded__ = true
+
+  window.__ModuleLoader__.load({
   id: 'dsh-letmesing',
   factory(require) {
     'use strict'
@@ -945,4 +950,5 @@ window.__ModuleLoader__.load({
       LetMeSingSettings,
     }
   },
-})
+  })
+}
