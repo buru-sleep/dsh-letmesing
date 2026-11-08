@@ -12,3 +12,6 @@ assets/music/*
 *.wav
 *.ogg
 *.opus
+
+# 部署用临时密钥，绝不入库
+.deploy/
