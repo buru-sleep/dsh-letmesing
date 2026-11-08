@@ -243,7 +243,9 @@ window.__ModuleLoader__.load({
       if (stopTimer) clearTimeout(stopTimer)
       stopTimer = setTimeout(() => {
         stopTimer = 0
-        stopNow()
+        // Fade instead of a hard cut: a turn that ends mid-loop should not click.
+        cancelFade()
+        fadeOut()
       }, REASONING_IDLE_MS)
     }
 
