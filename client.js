@@ -872,12 +872,26 @@ window.__ModuleLoader__.load({
       reportChunk('diag-init', sessionsApi ? 'sessions=ok' : 'sessions=null')
       acquireLeadership()
 
-      // Safety net: if a reasoning burst stops without a text chunk, fade out.
+      // Safety net. Reasoning mode: a burst that ends without a text chunk
+      // fades out. Turn mode: if the turn is still running and nothing is
+      // deliberately holding us quiet, resuming here recovers a missed chunk
+      // transition instead of leaving the track silent for the rest of the turn.
       const watchdog = setInterval(() => {
-        if (!config.enabled || config.mode !== 'reasoning') return
-        if (audio.paused) return
-        if (!lastReasoningAt) return
-        if (Date.now() - lastReasoningAt > REASONING_IDLE_MS) fadeOut()
+        if (!config.enabled) return
+        if (config.mode === 'reasoning') {
+          if (audio.paused || !lastReasoningAt) return
+          if (Date.now() - lastReasoningAt > REASONING_IDLE_MS) fadeOut()
+          return
+        }
+        if (
+          config.mode === 'turn' &&
+          lastRunning &&
+          !textPhase &&
+          !pausedForUser &&
+          audio.paused
+        ) {
+          resumePlayback()
+        }
       }, 350)
       ctx.effect(() => () => clearInterval(watchdog))
 
