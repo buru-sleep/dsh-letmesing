@@ -28,6 +28,14 @@
     "music",
     "bgm"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buru-sleep/dsh-letmesing.git"
+  },
+  "homepage": "https://github.com/buru-sleep/dsh-letmesing#readme",
+  "bugs": {
+    "url": "https://github.com/buru-sleep/dsh-letmesing/issues"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
