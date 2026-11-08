@@ -36,10 +36,16 @@
 **方式二：手动**
 
 ```bash
-git clone https://github.com/<your-name>/dsh-letmesing.git
+git clone https://github.com/buru-sleep/dsh-letmesing.git
 ```
 
 然后在 DSH 的插件管理里把该目录作为 bundle 安装。
+
+如果 `git clone` 失败，报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`，那是 Windows 上 git 的 HTTPS 后端拿不到系统凭据，跟仓库无关。换 SSH 地址克隆，或者直接在网页上下载 ZIP 解压，然后把解压后的目录交给助手安装：
+
+```bash
+git clone git@github.com:buru-sleep/dsh-letmesing.git
+```
 
 安装后需要**重启 DSH**（桌面端没有刷新按钮，Client 代码在启动时加载）。重启后打开 设置 → LetMeSing。
 
