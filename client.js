@@ -101,18 +101,26 @@ try {
       order: [],
     }
 
-    const audio = new Audio()
-    audio.preload = 'auto'
+    function createAudio() {
+      const el = new Audio()
+      el.preload = 'auto'
+      el.addEventListener('error', () => {
+        const code = el.error ? el.error.code : 0
+        reportChunk('audio-error', 'code=' + code)
+      })
+      el.addEventListener('ended', () => onEnded(el))
+      return el
+    }
+
+    // Two elements on purpose: one element can only rise or fall, never both at
+    // once, and a track change without the overlap sounds like a gap.
+    let audio = createAudio()
+    let spare = createAudio()
     audio.loop = config.playMode === 'one'
     audio.volume = config.volume
-    audio.addEventListener('error', () => {
-      const code = audio.error ? audio.error.code : 0
-      reportChunk('audio-error', 'code=' + code)
-    })
 
     let wantPlay = false
     let stopTimer = 0
-    let fadeTimer = 0
     let lastReasoningAt = 0
     let lastRunning = false
     // Set when the model asks the user something; later activity clears it.
@@ -221,6 +229,7 @@ try {
       try {
         audio.volume = config.volume
         audio.loop = config.playMode === 'one'
+        spare.loop = config.playMode === 'one'
       } catch {}
     }
 
@@ -311,59 +320,111 @@ try {
       return list[(at < 0 ? 0 : at + 1) % list.length]
     }
 
-    // `loop` covers the single-track case, so advancing only matters for
-    // shuffle and sequence. Playback continues only if it was wanted already:
-    // a track that ends during a fade-out should stay silent.
-    audio.addEventListener('ended', () => {
+    const CROSSFADE_MS = 220
+    let crossing = false
+
+    // Start the next track on the spare element while the current one is still
+    // audible: a single element can only fade one way, so swapping tracks used
+    // to leave a hole between the last sample and the new fade-in.
+    function crossfadeTo(next) {
+      if (crossing) return false
+      if (!shouldPlayNow()) return false
+      crossing = true
+      const outgoing = audio
+      const incoming = spare
+      incoming.setAttribute('src', PREFIX + '/music/' + encodeURIComponent(next))
+      incoming.loop = config.playMode === 'one'
+      incoming.volume = 0
+      const begin = () => {
+        config.file = next
+        lsWrite(LS.file, next)
+        savePrefs()
+        fadeEl(outgoing, 0, CROSSFADE_MS, () => {
+          try {
+            outgoing.pause()
+          } catch {}
+        })
+        fadeEl(incoming, config.volume, CROSSFADE_MS)
+        audio = incoming
+        spare = outgoing
+        setTimeout(() => {
+          crossing = false
+        }, CROSSFADE_MS + 80)
+      }
+      const attempt = incoming.play()
+      if (attempt && typeof attempt.then === 'function') {
+        attempt.then(begin, () => {
+          crossing = false
+        })
+      } else {
+        begin()
+      }
+      return true
+    }
+
+    function onEnded(el) {
       if (config.playMode === 'one') return
+      if (el !== audio) return
+      // Fallback for a track whose duration never arrived, so the size check in
+      // maybeCrossfade could not open the window.
+      if (crossing) return
+      const next = nextTrackName()
+      if (next) crossfadeTo(next)
+    }
+
+    // Approaching the end of a track and the next one is already wanted: overlap
+    // them. 120 ms is well inside the 220 ms fade, so the window is not missed.
+    function maybeCrossfade() {
+      if (crossing) return
+      if (config.playMode === 'one') return
+      if (audio.paused) return
+      const left = audio.duration - audio.currentTime
+      if (!isFinite(left) || left > 0.3) return
       const next = nextTrackName()
       if (!next) return
-      // Decide from the mode, not from wantPlay: a fade-out clears wantPlay, so
-      // a track that finished during the answer would otherwise stay silent.
-      const resume = shouldPlayNow()
-      config.file = next
-      lsWrite(LS.file, next)
-      savePrefs()
-      audio.setAttribute('src', PREFIX + '/music/' + encodeURIComponent(next))
-      try {
-        audio.load()
-      } catch {}
-      if (!resume) return
-      audio.volume = 0
-      const attempt = audio.play()
-      if (attempt && typeof attempt.then === 'function') {
-        attempt.then(() => fadeIn(), () => {})
-      } else {
-        fadeIn()
-      }
-    })
+      crossfadeTo(next)
+    }
 
-    function cancelFade() {
-      if (fadeTimer) {
-        clearInterval(fadeTimer)
-        fadeTimer = 0
+    // One timer per element: a crossfade runs two ramps at once, so a single
+    // module-level timer would cancel the other half.
+    const fadeTimers = new WeakMap()
+
+    function cancelFade(el) {
+      const target = el || audio
+      const timer = fadeTimers.get(target)
+      if (timer) {
+        clearInterval(timer)
+        fadeTimers.delete(target)
       }
     }
 
-    function fadeIn() {
-      cancelFade()
-      const target = config.volume
-      const from = audio.paused ? 0 : Math.min(audio.volume, target)
-      if (from >= target - 0.001) {
-        audio.volume = target
+    function fadeEl(el, target, span, onDone) {
+      cancelFade(el)
+      const from = el.paused ? 0 : el.volume
+      if (Math.abs(from - target) < 0.002) {
+        el.volume = target
+        if (onDone) onDone()
         return
       }
-      audio.volume = from
       const startedAt = Date.now()
-      fadeTimer = setInterval(() => {
-        const k = Math.min(1, (Date.now() - startedAt) / FADE_IN_MS)
-        audio.volume = from + (target - from) * k
+      const duration = Math.max(1, span || FADE_MS)
+      const timer = setInterval(() => {
+        const k = Math.min(1, (Date.now() - startedAt) / duration)
+        el.volume = from + (target - from) * k
         if (k >= 1) {
-          clearInterval(fadeTimer)
-          fadeTimer = 0
-          audio.volume = target
+          clearInterval(timer)
+          fadeTimers.delete(el)
+          if (onDone) onDone()
         }
-      }, 40)
+      }, 30)
+      fadeTimers.set(el, timer)
+    }
+
+    function fadeIn() {
+      const el = audio
+      const target = config.volume
+      el.volume = el.paused ? 0 : Math.min(el.volume, target)
+      fadeEl(el, target, FADE_IN_MS)
     }
 
     function startPlaying() {
@@ -416,26 +477,18 @@ try {
       // A fade-in may still be running — the answer can start inside its 700 ms.
       // Cancel it first, otherwise the early return below leaves the track
       // climbing back to full volume and it never fades.
-      cancelFade()
-      reportAlways('fade-out', 'paused=' + audio.paused + ' vol=' + audio.volume.toFixed(2))
+      const el = audio
+      cancelFade(el)
+      reportAlways('fade-out', 'paused=' + el.paused + ' vol=' + el.volume.toFixed(2))
       wantPlay = false
-      const from = audio.volume
-      const startedAt = Date.now()
-      const duration = span || FADE_MS
-      fadeTimer = setInterval(() => {
-        const k = Math.min(1, (Date.now() - startedAt) / duration)
-        audio.volume = from * (1 - k)
-        if (k >= 1) {
-          clearInterval(fadeTimer)
-          fadeTimer = 0
-          try {
-            audio.pause()
-          } catch {}
-          // Leave it at zero so the next start fades up from silence instead of
-          // snapping back to a level the user may have just overridden.
-          audio.volume = 0
-        }
-      }, 40)
+      fadeEl(el, 0, span || FADE_MS, () => {
+        try {
+          el.pause()
+        } catch {}
+        // Leave it at zero so the next start fades up from silence instead of
+        // snapping back to a level the user may have just overridden.
+        el.volume = 0
+      })
     }
 
     function scheduleStop() {
@@ -755,8 +808,12 @@ try {
           watchSession(sessionId)
           applyRunning(running)
         })
+        // Checks how close the current track is to its end so the next one can
+        // start underneath it. Cheap: it returns immediately unless playing.
+        const ticker = setInterval(maybeCrossfade, 120)
         return () => {
           alive = false
+          clearInterval(ticker)
           if (watched) {
             try {
               watched.unsubscribe()
@@ -931,6 +988,7 @@ try {
         config.playMode = next
         lsWrite(LS.playMode, next)
         audio.loop = next === 'one'
+        spare.loop = next === 'one'
         savePrefs()
       }
 
