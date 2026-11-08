@@ -115,5 +115,5 @@ node --check client.js
 
 ## 致谢
 
-- 《Let Me Go》— 罐装毕加索 / 星落落_oi，以及 B 站「大肥鱼」系列动画 PV
+- 《Let Me Go》— 罐装毕加索 / 星落落_oi 的[原曲](https://www.bilibili.com/video/BV1XbY66nEWr)，以及 B 站「大肥鱼」系列[动画 PV](https://www.bilibili.com/video/BV1mThC6LEbA)
 - [LetMeSeek](https://github.com/XYdyskYX/DSH-LetMeSeek) — 同族前辈，本项目的骨架参考
