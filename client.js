@@ -44,6 +44,9 @@ try {
       playMode: 'letmesing.playMode',
     }
     const FADE_MS = 420
+    // Slower than a text-phase fade: when the turn hands over to the user there
+    // is no follow-up sound covering the cut, so the fall has to be audible.
+    const FADE_OUT_IDLE_MS = 900
     const FADE_IN_MS = 700
     const REASONING_IDLE_MS = 1200
     // How long answer text keeps playback silent after the last text chunk.
@@ -385,7 +388,7 @@ try {
       } catch {}
     }
 
-    function fadeOut() {
+    function fadeOut(span) {
       if (audio.paused) return
       // A fade-in may still be running — the answer can start inside its 700 ms.
       // Cancel it first, otherwise the early return below leaves the track
@@ -395,8 +398,9 @@ try {
       wantPlay = false
       const from = audio.volume
       const startedAt = Date.now()
+      const duration = span || FADE_MS
       fadeTimer = setInterval(() => {
-        const k = Math.min(1, (Date.now() - startedAt) / FADE_MS)
+        const k = Math.min(1, (Date.now() - startedAt) / duration)
         audio.volume = from * (1 - k)
         if (k >= 1) {
           clearInterval(fadeTimer)
@@ -415,7 +419,7 @@ try {
         stopTimer = 0
         // Fade instead of a hard cut: a turn that ends mid-loop should not click.
         cancelFade()
-        fadeOut()
+        fadeOut(FADE_OUT_IDLE_MS)
       }, REASONING_IDLE_MS)
     }
 
@@ -560,11 +564,13 @@ try {
         const chunk = entry.event && entry.event.data && entry.event.data.chunk
         if (!chunk) continue
         const type = chunk.type
-        let sample = ''
-        try {
-          sample = JSON.stringify(chunk).slice(0, 220)
-        } catch {}
-        reportChunk(type, sample)
+        if (DEBUG) {
+          let sample = ''
+          try {
+            sample = JSON.stringify(chunk).slice(0, 220)
+          } catch {}
+          reportChunk(type, sample)
+        }
         if (type === 'block-start') {
           pausedForUser = false
           if (chunk.blockType === 'text') {
@@ -589,7 +595,7 @@ try {
           if (chunk.name === 'ask_user_question') {
             pausedForUser = true
             cancelStop()
-            fadeOut()
+            fadeOut(FADE_OUT_IDLE_MS)
             continue
           }
           pausedForUser = false
@@ -602,7 +608,7 @@ try {
             // Waiting on the user: go quiet until the next block starts.
             pausedForUser = true
             cancelStop()
-            fadeOut()
+            fadeOut(FADE_OUT_IDLE_MS)
           }
           continue
         }
