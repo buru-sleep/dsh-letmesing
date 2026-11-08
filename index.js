@@ -247,7 +247,11 @@ export function apply(ctx) {
         if (req.method === 'POST') {
           readBody(req).then((body) => {
             if (body && typeof body.type === 'string') {
-              chunkLog.push({ type: body.type, at: Date.now() })
+              chunkLog.push({
+                type: body.type,
+                sample: typeof body.sample === 'string' ? body.sample.slice(0, 240) : '',
+                at: Date.now(),
+              })
               if (chunkLog.length > 40) chunkLog.splice(0, chunkLog.length - 40)
             }
             sendJson(res, 200, { ok: true })

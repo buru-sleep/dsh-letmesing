@@ -254,11 +254,17 @@ window.__ModuleLoader__.load({
       }
     }
 
+    let lastRunningReport = ''
+    function reportRunning(running) {
+      // The host log only keeps `type`, so pack the state into the type string.
+      const key = (running ? 'run1' : 'run0') + ' ' + config.mode + ' p' + (audio.paused ? 1 : 0)
+      if (key === lastRunningReport) return
+      lastRunningReport = key
+      reportAlways(key, '')
+    }
+
     function applyRunning(running) {
-      reportAlways(
-        'running',
-        'v=' + (running ? 1 : 0) + ' mode=' + config.mode + ' paused=' + (audio.paused ? 1 : 0),
-      )
+      reportRunning(running)
       lastRunning = !!running
       if (!config.enabled) {
         cancelStop()
